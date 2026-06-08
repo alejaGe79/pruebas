@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema Solar</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #020208;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: #e2e8f0;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+        }
+
+        canvas:active { cursor: grabbing; }
+
+        .hud {
+            position: fixed;
+            top: 1.25rem;
+            left: 1.25rem;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        .hud h1 {
+            font-size: 1.35rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            background: linear-gradient(90deg, #fbbf24, #f97316);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hud p {
+            font-size: 0.8rem;
+            color: #64748b;
+            margin-top: 0.25rem;
+        }
+
+        .tooltip {
+            position: fixed;
+            z-index: 20;
+            padding: 0.5rem 0.85rem;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid rgba(80, 138, 243, 0.35);
+            border-radius: 8px;
+            font-size: 0.8rem;
+            pointer-events: none;
+            opacity: 0;
+            transform: translate(-50%, -120%);
+            transition: opacity 0.15s;
+            white-space: nowrap;
+            backdrop-filter: blur(8px);
+        }
+
+        .tooltip.visible { opacity: 1; }
+
+        .tooltip strong {
+            color: #508AF3;
+            display: block;
+            margin-bottom: 0.15rem;
+        }
+
+        .controls {
+            position: fixed;
+            bottom: 1.25rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            background: rgba(15, 23, 42, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 50px;
+            padding: 0.5rem 1rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .controls label {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-right: 0.25rem;
+        }
+
+        .controls input[type="range"] {
+            width: 100px;
+            accent-color: #508AF3;
+        }
+
+        .controls button {
+            background: rgba(80, 138, 243, 0.2);
+            border: 1px solid rgba(80, 138, 243, 0.4);
+            color: #e2e8f0;
+            padding: 0.35rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .controls button:hover {
+            background: rgba(80, 138, 243, 0.4);
+        }
+
+        .controls button.reset-btn {
+            background: rgba(255, 165, 0, 0.15);
+            border-color: rgba(255, 165, 0, 0.45);
+        }
+
+        .controls button.reset-btn:hover {
+            background: rgba(255, 165, 0, 0.35);
+        }
+
+        .laps-panel {
+            position: fixed;
+            top: 1.25rem;
+            right: 1.25rem;
+            z-index: 10;
+            width: 210px;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 14px;
+            padding: 0.85rem 1rem;
+            backdrop-filter: blur(12px);
+        }
+
+        .laps-panel h2 {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #64748b;
+            margin-bottom: 0.65rem;
+        }
+
+        .laps-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .laps-list li {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 0.78rem;
+            padding: 0.2rem 0;
+        }
+
+        .laps-list .planet-name {
+            display: flex;
+            align-items: center;
+            gap: 0.45rem;
+            color: #cbd5e1;
+        }
+
+        .laps-list .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .laps-list .lap-count {
+            font-weight: 700;
+            color: #FFA500;
+            min-width: 1.5rem;
+            text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .laps-list .lap-count.bump {
+            animation: lapBump 0.35s ease;
+        }
+
+        @keyframes lapBump {
+            0%   { transform: scale(1); }
+            50%  { transform: scale(1.45); color: #fbbf24; }
+            100% { transform: scale(1); }
+        }
+
+        @media (max-width: 700px) {
+            .laps-panel {
+                top: auto;
+                bottom: 5rem;
+                right: 0.75rem;
+                width: 175px;
+                font-size: 0.9rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="hud">
+        <h1>Sistema Solar</h1>
+        <p>Arrastrá para mover · Rueda para zoom</p>
+    </div>
+
+    <div class="tooltip" id="tooltip"></div>
+
+    <aside class="laps-panel" aria-label="Vueltas al Sol">
+        <h2>Vueltas al Sol</h2>
+        <ul class="laps-list" id="lapsList"></ul>
+    </aside>
+
+    <canvas id="space"></canvas>
+
+    <div class="controls">
+        <label>Velocidad</label>
+        <input type="range" id="speed" min="0" max="5" step="0.1" value="1">
+        <button id="toggleOrbits">Órbitas</button>
+        <button id="toggleLabels">Nombres</button>
+        <button id="resetLaps" class="reset-btn" title="Reiniciar contadores y posiciones">↺ Reiniciar</button>
+    </div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        const canvas = document.getElementById('space');
+        const ctx = canvas.getContext('2d');
+        const tooltip = document.getElementById('tooltip');
+        const speedInput = document.getElementById('speed');
+        const toggleOrbits = document.getElementById('toggleOrbits');
+        const toggleLabels = document.getElementById('toggleLabels');
+        const resetLaps = document.getElementById('resetLaps');
+        const lapsList = document.getElementById('lapsList');
+
+        // Escala visual (no real): distancias y tamaños comprimidos para caber en pantalla
+        const PLANETS = [
+            { name: 'Mercurio',  color: '#b5b5b5', radius: 3.5,  orbit: 55,  speed: 4.15,  tilt: 0.03 },
+            { name: 'Venus',     color: '#e8cda0', radius: 5.5,  orbit: 78,  speed: 1.62,  tilt: 0.01 },
+            { name: 'Tierra',    color: '#508AF3', radius: 6,    orbit: 105, speed: 1.00,  tilt: 0.02, moon: { radius: 1.8, orbit: 14, speed: 3.2 } },
+            { name: 'Marte',     color: '#c1440e', radius: 4.5,  orbit: 135, speed: 0.53,  tilt: 0.04 },
+            { name: 'Júpiter',   color: '#d4a574', radius: 14,   orbit: 185, speed: 0.084, tilt: 0.01 },
+            { name: 'Saturno',   color: '#f0d9a8', radius: 12,   orbit: 235, speed: 0.034, tilt: 0.05, rings: true },
+            { name: 'Urano',     color: '#7de3f4', radius: 8,    orbit: 280, speed: 0.012, tilt: 0.08 },
+            { name: 'Neptuno',   color: '#3b5bdb', radius: 7.5,  orbit: 320, speed: 0.006, tilt: 0.03 }
+        ];
+
+        let width, height, cx, cy;
+        let stars = [];
+        let time = 0;
+        let speedMult = 1;
+        let showOrbits = true;
+        let showLabels = true;
+        let camX = 0, camY = 0, zoom = 1;
+        let dragging = false, lastX = 0, lastY = 0;
+        let hoveredBody = null;
+        const TWO_PI = Math.PI * 2;
+        const prevLaps = PLANETS.map(function () { return 0; });
+
+        PLANETS.forEach(function (planet) {
+            const li = document.createElement('li');
+            li.innerHTML =
+                '<span class="planet-name">' +
+                    '<span class="dot" style="background:' + planet.color + '"></span>' +
+                    planet.name +
+                '</span>' +
+                '<span class="lap-count" data-planet="' + planet.name + '">0</span>';
+            lapsList.appendChild(li);
+        });
+
+        const lapCountEls = lapsList.querySelectorAll('.lap-count');
+
+        function getLaps(planet) {
+            return Math.floor((time * planet.speed * 0.3) / TWO_PI);
+        }
+
+        function updateLapsPanel() {
+            PLANETS.forEach(function (planet, i) {
+                const laps = getLaps(planet);
+                const el = lapCountEls[i];
+                if (el.textContent !== String(laps)) {
+                    el.textContent = laps;
+                    el.classList.remove('bump');
+                    void el.offsetWidth;
+                    el.classList.add('bump');
+                }
+                prevLaps[i] = laps;
+            });
+        }
+
+        function resetSimulation() {
+            time = 0;
+            PLANETS.forEach(function (_, i) {
+                prevLaps[i] = 0;
+                lapCountEls[i].textContent = '0';
+                lapCountEls[i].classList.remove('bump');
+            });
+        }
+
+        function resize() {
+            width = canvas.width = window.innerWidth;
+            height = canvas.height = window.innerHeight;
+            cx = width / 2;
+            cy = height / 2;
+            initStars();
+        }
+
+        function initStars() {
+            const count = Math.min(400, Math.floor((width * height) / 5000));
+            stars = [];
+            for (let i = 0; i < count; i++) {
+                stars.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: Math.random() * 1.2 + 0.2,
+                    a: Math.random() * 0.6 + 0.2,
+                    twinkle: Math.random() * Math.PI * 2
+                });
+            }
+        }
+
+        function drawStars() {
+            stars.forEach(function (s) {
+                const flicker = 0.5 + 0.5 * Math.sin(time * 0.002 + s.twinkle);
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,' + (s.a * flicker) + ')';
+                ctx.fill();
+            });
+        }
+
+        function worldToScreen(wx, wy) {
+            return {
+                x: cx + camX + wx * zoom,
+                y: cy + camY + wy * zoom
+            };
+        }
+
+        function screenToWorld(sx, sy) {
+            return {
+                x: (sx - cx - camX) / zoom,
+                y: (sy - cy - camY) / zoom
+            };
+        }
+
+        function drawSun() {
+            const pos = worldToScreen(0, 0);
+            const r = 22 * zoom;
+
+            const glow = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r * 3.5);
+            glow.addColorStop(0, 'rgba(255, 200, 50, 0.5)');
+            glow.addColorStop(0.4, 'rgba(255, 140, 0, 0.15)');
+            glow.addColorStop(1, 'rgba(255, 100, 0, 0)');
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, r * 3.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            const sunGrad = ctx.createRadialGradient(pos.x - r * 0.3, pos.y - r * 0.3, 0, pos.x, pos.y, r);
+            sunGrad.addColorStop(0, '#fff7c2');
+            sunGrad.addColorStop(0.5, '#ffc107');
+            sunGrad.addColorStop(1, '#ff6f00');
+            ctx.fillStyle = sunGrad;
+            ctx.beginPath();
+            ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (showLabels && zoom > 0.4) {
+                ctx.fillStyle = 'rgba(251, 191, 36, 0.9)';
+                ctx.font = (11 * zoom) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Sol', pos.x, pos.y - r - 8);
+            }
+        }
+
+        function getPlanetPos(planet, t) {
+            const angle = t * planet.speed * 0.3;
+            const wobble = Math.sin(angle * 3 + planet.tilt * 10) * planet.tilt * planet.orbit;
+            return {
+                x: Math.cos(angle) * planet.orbit + wobble,
+                y: Math.sin(angle) * planet.orbit * 0.92,
+                angle: angle
+            };
+        }
+
+        function drawOrbit(orbitRadius) {
+            const steps = 120;
+            ctx.beginPath();
+            for (let i = 0; i <= steps; i++) {
+                const a = (i / steps) * Math.PI * 2;
+                const wx = Math.cos(a) * orbitRadius;
+                const wy = Math.sin(a) * orbitRadius * 0.92;
+                const p = worldToScreen(wx, wy);
+                if (i === 0) ctx.moveTo(p.x, p.y);
+                else ctx.lineTo(p.x, p.y);
+            }
+            ctx.strokeStyle = 'rgba(80, 138, 243, 0.12)';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        function drawPlanet(planet, t) {
+            const pos = getPlanetPos(planet, t);
+            const screen = worldToScreen(pos.x, pos.y);
+            const pr = planet.radius * zoom;
+
+            if (showOrbits) drawOrbit(planet.orbit);
+
+            const bodyGrad = ctx.createRadialGradient(
+                screen.x - pr * 0.3, screen.y - pr * 0.3, 0,
+                screen.x, screen.y, pr
+            );
+            bodyGrad.addColorStop(0, lighten(planet.color, 40));
+            bodyGrad.addColorStop(1, planet.color);
+            ctx.fillStyle = bodyGrad;
+            ctx.beginPath();
+            ctx.arc(screen.x, screen.y, pr, 0, Math.PI * 2);
+            ctx.fill();
+
+            if (planet.rings) {
+                ctx.save();
+                ctx.translate(screen.x, screen.y);
+                ctx.rotate(0.4);
+                ctx.beginPath();
+                ctx.ellipse(0, 0, pr * 2.2, pr * 0.55, 0, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(210, 180, 120, 0.55)';
+                ctx.lineWidth = Math.max(1, pr * 0.35);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            if (planet.moon) {
+                const ma = t * planet.moon.speed * 0.3;
+                const mx = pos.x + Math.cos(ma) * planet.moon.orbit;
+                const my = pos.y + Math.sin(ma) * planet.moon.orbit;
+                const ms = worldToScreen(mx, my);
+                const mr = planet.moon.radius * zoom;
+                ctx.fillStyle = '#c0c0c0';
+                ctx.beginPath();
+                ctx.arc(ms.x, ms.y, mr, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            if (showLabels && zoom > 0.35) {
+                ctx.fillStyle = 'rgba(226, 232, 240, 0.85)';
+                ctx.font = (10 * Math.min(zoom, 1.2)) + 'px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(planet.name, screen.x, screen.y - pr - 6);
+            }
+
+            return { planet: planet, x: pos.x, y: pos.y, screenX: screen.x, screenY: screen.y, r: pr };
+        }
+
+        function lighten(hex, pct) {
+            const n = parseInt(hex.slice(1), 16);
+            const r = Math.min(255, (n >> 16) + pct);
+            const g = Math.min(255, ((n >> 8) & 0xff) + pct);
+            const b = Math.min(255, (n & 0xff) + pct);
+            return 'rgb(' + r + ',' + g + ',' + b + ')';
+        }
+
+        function findHovered(mx, my) {
+            const world = screenToWorld(mx, my);
+
+            if (Math.hypot(world.x, world.y) < 22) {
+                return { name: 'Sol', detail: 'Estrella central · ~4.600 millones de años' };
+            }
+
+            for (let i = PLANETS.length - 1; i >= 0; i--) {
+                const p = PLANETS[i];
+                const pos = getPlanetPos(p, time);
+                const dist = Math.hypot(world.x - pos.x, world.y - pos.y);
+                if (dist < p.radius + 4) {
+                    const laps = getLaps(p);
+                    return {
+                        name: p.name,
+                        detail: 'Vueltas al Sol: ' + laps + ' · Órbita: ' + p.orbit + ' u.v.'
+                    };
+                }
+            }
+            return null;
+        }
+
+        function draw() {
+            ctx.fillStyle = '#020208';
+            ctx.fillRect(0, 0, width, height);
+            drawStars();
+            drawSun();
+
+            const bodies = [];
+            PLANETS.forEach(function (planet) {
+                bodies.push(drawPlanet(planet, time));
+            });
+
+            time += speedMult;
+            updateLapsPanel();
+
+            if (hoveredBody) {
+                tooltip.classList.add('visible');
+            } else {
+                tooltip.classList.remove('visible');
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        canvas.addEventListener('mousedown', function (e) {
+            dragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+
+        window.addEventListener('mouseup', function () { dragging = false; });
+
+        window.addEventListener('mousemove', function (e) {
+            if (dragging) {
+                camX += e.clientX - lastX;
+                camY += e.clientY - lastY;
+                lastX = e.clientX;
+                lastY = e.clientY;
+            }
+
+            hoveredBody = findHovered(e.clientX, e.clientY);
+            if (hoveredBody) {
+                tooltip.innerHTML = '<strong>' + hoveredBody.name + '</strong>' + hoveredBody.detail;
+                tooltip.style.left = e.clientX + 'px';
+                tooltip.style.top = e.clientY + 'px';
+            }
+        });
+
+        canvas.addEventListener('wheel', function (e) {
+            e.preventDefault();
+            const factor = e.deltaY > 0 ? 0.92 : 1.08;
+            const before = screenToWorld(e.clientX, e.clientY);
+            zoom = Math.max(0.3, Math.min(3, zoom * factor));
+            const after = screenToWorld(e.clientX, e.clientY);
+            camX += (after.x - before.x) * zoom;
+            camY += (after.y - before.y) * zoom;
+        }, { passive: false });
+
+        speedInput.addEventListener('input', function () {
+            speedMult = parseFloat(this.value);
+        });
+
+        toggleOrbits.addEventListener('click', function () {
+            showOrbits = !showOrbits;
+            this.style.background = showOrbits ? 'rgba(80, 138, 243, 0.2)' : 'rgba(80, 138, 243, 0.5)';
+        });
+
+        toggleLabels.addEventListener('click', function () {
+            showLabels = !showLabels;
+            this.style.background = showLabels ? 'rgba(80, 138, 243, 0.2)' : 'rgba(80, 138, 243, 0.5)';
+        });
+
+        resetLaps.addEventListener('click', resetSimulation);
+
+        window.addEventListener('resize', resize);
+        resize();
+        draw();
+    })();
+    </script>
+</body>
+</html>
