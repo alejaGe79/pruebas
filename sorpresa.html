@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sinapsis</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        html, body {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #020208;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            color: #94a3b8;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+
+        .hud {
+            position: fixed;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .hud-top {
+            top: 1.25rem;
+            left: 1.25rem;
+        }
+
+        .hud-top h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+            letter-spacing: 0.35em;
+            text-transform: uppercase;
+            background: linear-gradient(90deg, #508AF3, #a78bfa, #FFA500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hud-top p {
+            font-size: 0.72rem;
+            margin-top: 0.35rem;
+            color: #475569;
+            line-height: 1.5;
+        }
+
+        .hud-bottom {
+            bottom: 1.25rem;
+            left: 50%;
+            transform: translateX(-50%);
+            text-align: center;
+            font-size: 0.68rem;
+            color: #334155;
+            letter-spacing: 0.05em;
+        }
+
+        .mode-tag {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.8);
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: 0.2em;
+            text-transform: uppercase;
+            color: rgba(255,255,255,0.85);
+            pointer-events: none;
+            opacity: 0;
+            z-index: 20;
+            text-shadow: 0 0 40px rgba(80,138,243,0.8);
+        }
+
+        .mode-tag.show {
+            animation: modePop 1.2s ease forwards;
+        }
+
+        @keyframes modePop {
+            0%   { opacity: 0; transform: translate(-50%,-50%) scale(0.6); }
+            20%  { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+            80%  { opacity: 1; }
+            100% { opacity: 0; transform: translate(-50%,-50%) scale(1.1); }
+        }
+
+        .pulse-ring {
+            position: fixed;
+            border: 2px solid rgba(80, 138, 243, 0.6);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 5;
+            animation: ringExpand 0.8s ease-out forwards;
+        }
+
+        @keyframes ringExpand {
+            from { width: 0; height: 0; opacity: 1; margin: 0; }
+            to   { width: 120px; height: 120px; opacity: 0; margin: -60px; }
+        }
+
+        @media (max-width: 600px) {
+            .hud-top h1 { font-size: 0.9rem; letter-spacing: 0.2em; }
+            .hud-bottom { font-size: 0.6rem; padding: 0 1rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="hud hud-top">
+        <h1>Sinapsis</h1>
+        <p>Mové el cursor · Clic = pulso<br>Barra espaciadora = modo · R = reiniciar</p>
+    </div>
+
+    <div class="hud hud-bottom" id="stats">—</div>
+    <div class="mode-tag" id="modeTag"></div>
+
+    <canvas id="c"></canvas>
+
+    <script>
+    (function () {
+        'use strict';
+
+        const canvas = document.getElementById('c');
+        const ctx = canvas.getContext('2d');
+        const statsEl = document.getElementById('stats');
+        const modeTag = document.getElementById('modeTag');
+
+        const MODES = [
+            { id: 'attractor', name: 'Atractor',  color: [80, 138, 243] },
+            { id: 'galaxy',    name: 'Galaxia',   color: [255, 165, 0] },
+            { id: 'flock',     name: 'Bandada',   color: [167, 139, 250] },
+            { id: 'gravity',   name: 'Gravedad',  color: [34, 211, 238] }
+        ];
+
+        let w, h, cx, cy;
+        let modeIndex = 0;
+        let mouse = { x: 0, y: 0, down: false, wx: 0, wy: 0 };
+        let pulses = [];
+        let nodes = [];
+        let particles = [];
+        let bodies = [];
+        let stars = [];
+        let attractorPts = [];
+        let ax = 0, ay = 0, az = 0, aw = 0;
+        let frame = 0;
+        let reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+        function resize() {
+            w = canvas.width = window.innerWidth;
+            h = canvas.height = window.innerHeight;
+            cx = w / 2;
+            cy = h / 2;
+            initStars();
+            if (!nodes.length) seedNodes();
+        }
+
+        function initStars() {
+            stars = [];
+            const n = Math.min(600, Math.floor(w * h / 4000));
+            for (let i = 0; i < n; i++) {
+                stars.push({
+                    x: Math.random() * w,
+                    y: Math.random() * h,
+                    r: Math.random() * 1.2 + 0.2,
+                    a: Math.random() * 0.5 + 0.1,
+                    tw: Math.random() * 6.28
+                });
+            }
+        }
+
+        function seedNodes() {
+            nodes = [];
+            const positions = [
+                [0.2, 0.3], [0.8, 0.25], [0.5, 0.5],
+                [0.15, 0.75], [0.85, 0.7], [0.35, 0.55], [0.65, 0.4]
+            ];
+            positions.forEach(function (p, i) {
+                nodes.push({
+                    x: p[0] * w,
+                    y: p[1] * h,
+                    r: 4 + Math.random() * 3,
+                    phase: Math.random() * Math.PI * 2,
+                    id: i
+                });
+            });
+        }
+
+        function resetMode() {
+            particles = [];
+            bodies = [];
+            attractorPts = [];
+            pulses = [];
+            const m = MODES[modeIndex];
+
+            if (m.id === 'attractor') {
+                for (let i = 0; i < 8000; i++) {
+                    attractorPts.push({
+                        x: (Math.random() - 0.5) * 2,
+                        y: (Math.random() - 0.5) * 2
+                    });
+                }
+                ax = -1.4; ay = 1.6; az = 1.0; aw = 0.6;
+            }
+
+            if (m.id === 'galaxy') {
+                for (let i = 0; i < 2500; i++) {
+                    const arm = Math.floor(Math.random() * 3);
+                    const dist = Math.random() * 0.9 + 0.05;
+                    const angle = arm * (Math.PI * 2 / 3) + dist * 5 + Math.random() * 0.3;
+                    particles.push({
+                        angle: angle,
+                        dist: dist,
+                        speed: 0.003 / dist,
+                        size: Math.random() * 1.5 + 0.3,
+                        hue: 200 + dist * 40 + arm * 20
+                    });
+                }
+            }
+
+            if (m.id === 'flock') {
+                for (let i = 0; i < 180; i++) {
+                    particles.push({
+                        x: Math.random() * w,
+                        y: Math.random() * h,
+                        vx: (Math.random() - 0.5) * 2,
+                        vy: (Math.random() - 0.5) * 2
+                    });
+                }
+            }
+
+            if (m.id === 'gravity') {
+                bodies.push({ x: cx, y: cy, vx: 0, vy: 0, m: 800, fixed: true, hue: 45 });
+                for (let i = 0; i < 120; i++) spawnBody();
+            }
+        }
+
+        function spawnBody(atX, atY) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = atX ? 0 : 80 + Math.random() * Math.min(w, h) * 0.35;
+            const x = atX || cx + Math.cos(angle) * dist;
+            const y = atY || cy + Math.sin(angle) * dist;
+            const spd = Math.sqrt(800 / (dist || 80)) * 0.55;
+            bodies.push({
+                x: x, y: y,
+                vx: -Math.sin(angle) * spd + (Math.random() - 0.5),
+                vy: Math.cos(angle) * spd + (Math.random() - 0.5),
+                m: 2 + Math.random() * 6,
+                fixed: false,
+                hue: 200 + Math.random() * 60,
+                trail: []
+            });
+        }
+
+        function showModeName() {
+            modeTag.textContent = MODES[modeIndex].name;
+            modeTag.classList.remove('show');
+            void modeTag.offsetWidth;
+            modeTag.classList.add('show');
+        }
+
+        function nextMode() {
+            modeIndex = (modeIndex + 1) % MODES.length;
+            resetMode();
+            showModeName();
+        }
+
+        function spawnPulse(x, y) {
+            pulses.push({ x: x, y: y, r: 0, life: 1 });
+            const ring = document.createElement('div');
+            ring.className = 'pulse-ring';
+            ring.style.left = x + 'px';
+            ring.style.top = y + 'px';
+            document.body.appendChild(ring);
+            setTimeout(function () { ring.remove(); }, 800);
+        }
+
+        function drawStars() {
+            stars.forEach(function (s) {
+                const flick = 0.5 + 0.5 * Math.sin(frame * 0.02 + s.tw);
+                ctx.beginPath();
+                ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(255,255,255,' + (s.a * flick) + ')';
+                ctx.fill();
+            });
+        }
+
+        function fade(alpha) {
+            ctx.fillStyle = 'rgba(2,2,8,' + alpha + ')';
+            ctx.fillRect(0, 0, w, h);
+        }
+
+        /* ——— MODO 1: Atractor de Clifford ——— */
+        function drawAttractor() {
+            fade(reduced ? 0.25 : 0.12);
+
+            const targetA = -1.8 + (mouse.x / w) * 3.6;
+            const targetY = -1.8 + (mouse.y / h) * 3.6;
+            ax += (targetA - ax) * 0.02;
+            ay += (targetY - ay) * 0.02;
+            az = 1.0 + Math.sin(frame * 0.008) * 0.3;
+            aw = 0.6 + Math.cos(frame * 0.006) * 0.2;
+
+            const scale = Math.min(w, h) * 0.22;
+            const step = reduced ? 4 : 2;
+
+            for (let i = 0; i < attractorPts.length; i += step) {
+                const p = attractorPts[i];
+                const nx = Math.sin(ay * p.y) + az * Math.cos(ay * p.x);
+                const ny = Math.sin(ax * p.x) + aw * Math.cos(ax * p.y);
+                p.x = nx;
+                p.y = ny;
+
+                const px = cx + nx * scale;
+                const py = cy + ny * scale;
+
+                const t = (Math.sin(nx * 3 + ny * 2) + 1) * 0.5;
+                const r = Math.floor(80 + t * 100);
+                const g = Math.floor(100 + t * 80);
+                const b = Math.floor(200 + t * 55);
+
+                ctx.fillStyle = 'rgba(' + r + ',' + g + ',' + b + ',0.65)';
+                ctx.fillRect(px, py, 1.5, 1.5);
+            }
+
+            pulses.forEach(function (p) {
+                p.r += 4;
+                p.life -= 0.02;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(80,138,243,' + p.life * 0.5 + ')';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+            pulses = pulses.filter(function (p) { return p.life > 0; });
+        }
+
+        /* ——— MODO 2: Galaxia espiral ——— */
+        function drawGalaxy() {
+            fade(0.15);
+
+            const spin = frame * 0.001;
+            const mx = (mouse.x - cx) / w;
+            const my = (mouse.y - cy) / h;
+
+            particles.forEach(function (p) {
+                p.angle += p.speed * (1 + mx * 2);
+                const d = p.dist * Math.min(w, h) * 0.45;
+                const x = cx + Math.cos(p.angle + spin) * d + mx * 30;
+                const y = cy + Math.sin(p.angle + spin) * d * 0.35 + my * 20;
+
+                ctx.beginPath();
+                ctx.arc(x, y, p.size, 0, Math.PI * 2);
+                ctx.fillStyle = 'hsla(' + p.hue + ',80%,65%,0.7)';
+                ctx.fill();
+            });
+
+            const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 60);
+            glow.addColorStop(0, 'rgba(255,200,80,0.9)');
+            glow.addColorStop(0.4, 'rgba(255,165,0,0.3)');
+            glow.addColorStop(1, 'rgba(255,165,0,0)');
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(cx + mx * 20, cy + my * 15, 50, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        /* ——— MODO 3: Bandada + sinapsis ——— */
+        function drawFlock() {
+            fade(0.18);
+
+            const mx = mouse.x;
+            const my = mouse.y;
+
+            nodes.forEach(function (n, i) {
+                n.x += Math.sin(frame * 0.01 + n.phase) * 0.3;
+                n.y += Math.cos(frame * 0.012 + n.phase) * 0.25;
+            });
+
+            ctx.lineWidth = 0.6;
+            for (let i = 0; i < nodes.length; i++) {
+                for (let j = i + 1; j < nodes.length; j++) {
+                    const dx = nodes[i].x - nodes[j].x;
+                    const dy = nodes[i].y - nodes[j].y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist < 220) {
+                        const alpha = (1 - dist / 220) * 0.35;
+                        ctx.strokeStyle = 'rgba(80,138,243,' + alpha + ')';
+                        ctx.beginPath();
+                        ctx.moveTo(nodes[i].x, nodes[i].y);
+                        ctx.lineTo(nodes[j].x, nodes[j].y);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            pulses.forEach(function (p) {
+                nodes.forEach(function (n) {
+                    const dx = n.x - p.x;
+                    const dy = n.y - p.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (Math.abs(dist - p.r) < 12) {
+                        n.r = Math.min(12, n.r + 0.5);
+                    }
+                });
+                p.r += 6;
+                p.life -= 0.015;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(167,139,250,' + p.life * 0.6 + ')';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            });
+            pulses = pulses.filter(function (p) { return p.life > 0; });
+
+            nodes.forEach(function (n) {
+                n.r += (4 + Math.sin(frame * 0.05 + n.phase) * 2 - n.r) * 0.05;
+                const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r * 3);
+                g.addColorStop(0, 'rgba(80,138,243,0.9)');
+                g.addColorStop(1, 'rgba(80,138,243,0)');
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, n.r * 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#e2e8f0';
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, n.r * 0.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            particles.forEach(function (p) {
+                let ax = 0, ay = 0, count = 0;
+                nodes.forEach(function (n) {
+                    const dx = n.x - p.x;
+                    const dy = n.y - p.y;
+                    const d = Math.sqrt(dx * dx + dy * dy);
+                    if (d < 150 && d > 1) {
+                        ax += dx / d * 0.08;
+                        ay += dy / d * 0.08;
+                        count++;
+                    }
+                });
+
+                const dx = mx - p.x;
+                const dy = my - p.y;
+                const md = Math.sqrt(dx * dx + dy * dy) || 1;
+                if (md < 200) {
+                    ax -= (dx / md) * 0.15;
+                    ay -= (dy / md) * 0.15;
+                }
+
+                if (count) {
+                    ax += (ax / count);
+                    ay += (ay / count);
+                }
+
+                p.vx = (p.vx + ax) * 0.92;
+                p.vy = (p.vy + ay) * 0.92;
+                const spd = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+                if (spd > 4) { p.vx = p.vx / spd * 4; p.vy = p.vy / spd * 4; }
+                p.x += p.vx;
+                p.y += p.vy;
+
+                if (p.x < 0) p.x = w;
+                if (p.x > w) p.x = 0;
+                if (p.y < 0) p.y = h;
+                if (p.y > h) p.y = 0;
+
+                ctx.fillStyle = 'rgba(255,165,0,0.75)';
+                ctx.fillRect(p.x, p.y, 2, 2);
+            });
+        }
+
+        /* ——— MODO 4: Gravedad orbital ——— */
+        function drawGravity() {
+            ctx.fillStyle = 'rgba(2,2,8,0.35)';
+            ctx.fillRect(0, 0, w, h);
+
+            if (bodies[0]) {
+                bodies[0].x += (mouse.x - bodies[0].x) * 0.03;
+                bodies[0].y += (mouse.y - bodies[0].y) * 0.03;
+            }
+
+            for (let i = 0; i < bodies.length; i++) {
+                const a = bodies[i];
+                if (a.fixed) continue;
+                for (let j = 0; j < bodies.length; j++) {
+                    if (i === j) continue;
+                    const b = bodies[j];
+                    const dx = b.x - a.x;
+                    const dy = b.y - a.y;
+                    const distSq = dx * dx + dy * dy + 80;
+                    const force = (0.4 * b.m) / distSq;
+                    const dist = Math.sqrt(distSq);
+                    a.vx += (dx / dist) * force;
+                    a.vy += (dy / dist) * force;
+                }
+                a.vx *= 0.999;
+                a.vy *= 0.999;
+                a.x += a.vx;
+                a.y += a.vy;
+
+                a.trail.push({ x: a.x, y: a.y });
+                if (a.trail.length > 40) a.trail.shift();
+
+                if (bodies[0]) {
+                    const dx = a.x - bodies[0].x;
+                    const dy = a.y - bodies[0].y;
+                    if (Math.sqrt(dx * dx + dy * dy) < 18 + bodies[0].m * 0.01) {
+                        bodies[0].m += a.m * 0.3;
+                        bodies.splice(i, 1);
+                        i--;
+                        continue;
+                    }
+                }
+            }
+
+            bodies.forEach(function (b) {
+                if (!b.fixed && b.trail.length > 2) {
+                    ctx.beginPath();
+                    ctx.moveTo(b.trail[0].x, b.trail[0].y);
+                    b.trail.forEach(function (t, i) {
+                        if (i > 0) ctx.lineTo(t.x, t.y);
+                    });
+                    ctx.strokeStyle = 'hsla(' + b.hue + ',70%,60%,0.25)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+
+                const r = b.fixed ? 12 + Math.sqrt(b.m) * 0.4 : 2 + Math.sqrt(b.m);
+                const g = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, r * (b.fixed ? 4 : 2));
+                if (b.fixed) {
+                    g.addColorStop(0, '#fff7c2');
+                    g.addColorStop(0.3, '#FFA500');
+                    g.addColorStop(1, 'rgba(255,100,0,0)');
+                } else {
+                    g.addColorStop(0, 'hsla(' + b.hue + ',80%,70%,1)');
+                    g.addColorStop(1, 'hsla(' + b.hue + ',80%,50%,0)');
+                }
+                ctx.fillStyle = g;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, r * (b.fixed ? 4 : 2), 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = b.fixed ? '#ffc107' : 'hsl(' + b.hue + ',80%,65%)';
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, r, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            if (bodies.length < 200 && frame % 30 === 0 && !reduced) spawnBody();
+        }
+
+        function draw() {
+            frame++;
+            drawStars();
+
+            const mode = MODES[modeIndex].id;
+            if (mode === 'attractor') drawAttractor();
+            else if (mode === 'galaxy') drawGalaxy();
+            else if (mode === 'flock') drawFlock();
+            else drawGravity();
+
+            statsEl.textContent = MODES[modeIndex].name + ' · frame ' + frame +
+                (mode === 'gravity' && bodies[0] ? ' · masa ' + Math.floor(bodies[0].m) : '') +
+                (mode === 'attractor' ? ' · puntos ' + attractorPts.length : '');
+
+            requestAnimationFrame(draw);
+        }
+
+        canvas.addEventListener('mousemove', function (e) {
+            mouse.x = e.clientX;
+            mouse.y = e.clientY;
+        });
+
+        canvas.addEventListener('mousedown', function (e) {
+            mouse.down = true;
+            const mode = MODES[modeIndex].id;
+            if (mode === 'attractor' || mode === 'flock') {
+                spawnPulse(e.clientX, e.clientY);
+            }
+            if (mode === 'gravity') {
+                for (let i = 0; i < 8; i++) spawnBody(e.clientX, e.clientY);
+            }
+            if (mode === 'galaxy') {
+                particles.forEach(function (p) {
+                    p.speed *= 1.05;
+                });
+            }
+        });
+
+        canvas.addEventListener('touchstart', function (e) {
+            e.preventDefault();
+            const t = e.touches[0];
+            mouse.x = t.clientX;
+            mouse.y = t.clientY;
+            canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: t.clientX, clientY: t.clientY }));
+        }, { passive: false });
+
+        canvas.addEventListener('touchmove', function (e) {
+            e.preventDefault();
+            mouse.x = e.touches[0].clientX;
+            mouse.y = e.touches[0].clientY;
+        }, { passive: false });
+
+        window.addEventListener('keydown', function (e) {
+            if (e.code === 'Space') { e.preventDefault(); nextMode(); }
+            if (e.key === 'r' || e.key === 'R') { resetMode(); showModeName(); }
+        });
+
+        window.addEventListener('resize', resize);
+
+        resize();
+        resetMode();
+        showModeName();
+        draw();
+    })();
+    </script>
+</body>
+</html>
